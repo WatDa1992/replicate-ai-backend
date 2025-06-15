@@ -1,20 +1,22 @@
+import fetch from 'node-fetch';
+
 export default async function handler(req, res) {
+  // 👇 Handle CORS preflight request
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    return res.status(200).end();
+  }
+
+  // 👇 Allow CORS on actual POST request
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  let prompt;
-  try {
-    const body = await new Promise((resolve, reject) => {
-      let data = "";
-      req.on("data", chunk => data += chunk);
-      req.on("end", () => resolve(JSON.parse(data)));
-      req.on("error", reject);
-    });
-    prompt = body.prompt;
-  } catch (e) {
-    return res.status(400).json({ error: "Invalid JSON body" });
-  }
+  const { prompt } = await req.json();
 
   if (!prompt) {
     return res.status(400).json({ error: "Missing prompt" });
@@ -29,8 +31,8 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         version: "7762fd07e4c67fbe0c076755b50d4bb74f50f3c60695387c95c8f3a7f0e4c92d",
-        input: { prompt }
-      })
+        input: { prompt },
+      }),
     });
 
     const result = await response.json();

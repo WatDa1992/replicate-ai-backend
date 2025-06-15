@@ -1,3 +1,4 @@
+// backend/api/generate.js
 import fetch from 'node-fetch';
 
 export default async function handler(req, res) {
@@ -9,7 +10,7 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Allow CORS on POST request
+  // Allow CORS on real requests
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   if (req.method !== 'POST') {
@@ -17,36 +18,62 @@ export default async function handler(req, res) {
   }
 
   const { prompt } = req.body;
-
   if (!prompt) {
     return res.status(400).json({ error: 'Missing prompt' });
   }
 
   try {
-    const response = await fetch('https://api.replicate.com/v1/predictions', {
+    // 1. Create the prediction
+    const predictionRes = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Token ${process.env.REPLICATE_API_TOKEN}`,
       },
       body: JSON.stringify({
-        version: "a9758cbf3c24bbd87f1d75f1d9898aa65313cd8f1f2441c278a4a536e1c4104d", // SDXL-lite
-        input: {
-          prompt: prompt,
-          width: 512,
-          height: 512
-        }
+        version: 'aa74f5342c79e8eae4c206790f604c78b4e1c5bbd27ab5fb1e1a5d540a938d9a', // free emoji model for testing
+        input: { prompt },
       }),
     });
 
-    const result = await response.json();
+    const prediction = await predictionRes.json();
 
-    if (result.error) {
-      return res.status(500).json({ error: result.error });
+    if (prediction.detail) {
+      return res.status(422).json({ error: prediction.detail });
     }
 
-    return res.status(200).json(result);
+    const predictionId = prediction.id;
+    let image = null;
+    let tries = 0;
+
+    // 2. Poll for result (max 10 tries)
+    while (tries < 10) {
+      const checkRes = await fetch(`https://api.replicate.com/v1/predictions/${predictionId}`, {
+        headers: {
+          Authorization: `Token ${process.env.REPLICATE_API_TOKEN}`,
+        },
+      });
+      const checkData = await checkRes.json();
+
+      if (checkData.status === 'succeeded') {
+        image = checkData.output?.[0];
+        break;
+      }
+      if (checkData.status === 'failed') {
+        return res.status(500).json({ error: 'Image generation failed.' });
+      }
+
+      await new Promise(r => setTimeout(r, 1000)); // wait 1 second
+      tries++;
+    }
+
+    if (!image) {
+      return res.status(500).json({ error: 'No image returned.' });
+    }
+
+    return res.status(200).json({ image });
   } catch (err) {
-    return res.status(500).json({ error: 'Failed to generate image' });
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to generate image.' });
   }
 }
